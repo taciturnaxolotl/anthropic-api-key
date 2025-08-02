@@ -1,6 +1,6 @@
 {
   "name": "anthropic-api-key",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "CLI to fetch Anthropic API access tokens via OAuth with PKCE using Bun.",
   "type": "module",
   "private": false,
@@ -15,7 +15,7 @@
   },
   "homepage": "https://github.com/taciturnaxolotl/anthropic-api-key#readme",
   "bin": {
-    "anthropic": "dist/index.js"
+    "anthropic-api-key": "dist/index.js"
   },
   "exports": {
     ".": "./dist/index.js",

@@ -1,5 +1,17 @@
 #!/usr/bin/env bun
 
+// Detect if running under Node.js instead of Bun
+if (
+  typeof Bun === "undefined" ||
+  // @ts-ignore
+  (typeof process !== "undefined" && process.release?.name === "node")
+) {
+  console.error(
+    "❌ This CLI requires Bun. Please install Bun from https://bun.sh/",
+  );
+  process.exit(1);
+}
+
 import { serve } from "bun";
 import {
   bootstrapFromDisk,
