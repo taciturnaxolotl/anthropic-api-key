@@ -1,0 +1,12 @@
+{
+  "$schema": "https://charm.land/crush.json",
+  "lsp": {
+    "biome": {
+      "command": "npx",
+      "args": [
+        "biome",
+        "lsp-proxy"
+      ]
+    }
+  }
+}

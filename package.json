@@ -1,0 +1,35 @@
+{
+  "name": "anthropic-api-key",
+  "version": "0.1.0",
+  "description": "CLI to fetch Anthropic API access tokens via OAuth with PKCE using Bun.",
+  "type": "module",
+  "private": false,
+  "license": "MIT",
+  "author": "taciturnaxolotl",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/taciturnaxolotl/anthropic-api-key.git"
+  },
+  "bugs": {
+    "url": "https://github.com/taciturnaxolotl/anthropic-api-key/issues"
+  },
+  "homepage": "https://github.com/taciturnaxolotl/anthropic-api-key#readme",
+  "bin": {
+    "anthropic": "dist/anthropic.js"
+  },
+  "exports": {
+    ".": "./dist/anthropic.js"
+  },
+  "files": [
+    "dist",
+    "public"
+  ],
+  "scripts": {
+    "build": "bun build bin/anthropic.ts --outdir=dist --target=bun --sourcemap=external",
+    "prepare": "bun run build"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
+  }
+}
