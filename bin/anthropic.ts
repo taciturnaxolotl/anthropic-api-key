@@ -201,114 +201,125 @@ async function bootstrapFromDisk() {
   }
 }
 
-await bootstrapFromDisk();
+const didBootstrap = await bootstrapFromDisk();
 
 const argv = process.argv.slice(2);
 if (argv.includes("-h") || argv.includes("--help")) {
   Bun.write(Bun.stdout, `Usage: anthropic\n\n`);
-  Bun.write(Bun.stdout, `  anthropic                Start UI and flow; prints token on success and exits.\n`);
-  Bun.write(Bun.stdout, `  PORT=xxxx anthropic      Override port (default 8787).\n`);
-  Bun.write(Bun.stdout, `\nTokens are cached at ~/.config/crush/anthropic and reused on later runs.\n`);
+  Bun.write(
+    Bun.stdout,
+    `  anthropic                Start UI and flow; prints token on success and exits.\n`,
+  );
+  Bun.write(
+    Bun.stdout,
+    `  PORT=xxxx anthropic      Override port (default 8787).\n`,
+  );
+  Bun.write(
+    Bun.stdout,
+    `\nTokens are cached at ~/.config/crush/anthropic and reused on later runs.\n`,
+  );
   process.exit(0);
 }
 
-serve({
-  port: PORT,
-  development: { console: false },
-  async fetch(req) {
-    const url = new URL(req.url);
+if (!didBootstrap) {
+  serve({
+    port: PORT,
+    development: { console: false },
+    async fetch(req) {
+      const url = new URL(req.url);
 
-    if (url.pathname.startsWith("/api/")) {
-      if (url.pathname === "/api/ping")
-        return json({ ok: true, ts: Date.now() });
+      if (url.pathname.startsWith("/api/")) {
+        if (url.pathname === "/api/ping")
+          return json({ ok: true, ts: Date.now() });
 
-      if (url.pathname === "/api/auth/start" && req.method === "POST") {
-        const { verifier, challenge } = await pkcePair();
-        const authUrl = authorizeUrl(verifier, challenge);
-        return json({ authUrl, verifier });
-      }
-
-      if (url.pathname === "/api/auth/complete" && req.method === "POST") {
-        const body = (await req.json().catch(() => ({}))) as {
-          code?: string;
-          verifier?: string;
-        };
-        const code = String(body.code ?? "");
-        const verifier = String(body.verifier ?? "");
-        if (!code || !verifier)
-          return json({ error: "missing code or verifier" }, { status: 400 });
-        const tokens = await exchangeAuthorizationCode(code, verifier);
-        const expiresAt =
-          Math.floor(Date.now() / 1000) + (tokens.expires_in ?? 0);
-        const entry = {
-          accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token,
-          expiresAt,
-        };
-        memory.set("tokens", entry);
-        await saveToDisk(entry);
-        Bun.write(Bun.stdout, `${entry.accessToken}\n`);
-        setTimeout(() => process.exit(0), 100);
-        return json({ ok: true });
-      }
-
-      if (url.pathname === "/api/token" && req.method === "GET") {
-        let entry = memory.get("tokens");
-        if (!entry) {
-          const disk = await loadFromDisk();
-          if (disk) {
-            entry = disk;
-            memory.set("tokens", entry);
-          }
+        if (url.pathname === "/api/auth/start" && req.method === "POST") {
+          const { verifier, challenge } = await pkcePair();
+          const authUrl = authorizeUrl(verifier, challenge);
+          return json({ authUrl, verifier });
         }
-        if (!entry)
-          return json({ error: "not_authenticated" }, { status: 401 });
-        const now = Math.floor(Date.now() / 1000);
-        if (now >= entry.expiresAt - 60) {
-          const refreshed = await exchangeRefreshToken(entry.refreshToken);
-          entry.accessToken = refreshed.access_token;
-          entry.expiresAt =
-            Math.floor(Date.now() / 1000) + refreshed.expires_in;
-          if (refreshed.refresh_token)
-            entry.refreshToken = refreshed.refresh_token;
+
+        if (url.pathname === "/api/auth/complete" && req.method === "POST") {
+          const body = (await req.json().catch(() => ({}))) as {
+            code?: string;
+            verifier?: string;
+          };
+          const code = String(body.code ?? "");
+          const verifier = String(body.verifier ?? "");
+          if (!code || !verifier)
+            return json({ error: "missing code or verifier" }, { status: 400 });
+          const tokens = await exchangeAuthorizationCode(code, verifier);
+          const expiresAt =
+            Math.floor(Date.now() / 1000) + (tokens.expires_in ?? 0);
+          const entry = {
+            accessToken: tokens.access_token,
+            refreshToken: tokens.refresh_token,
+            expiresAt,
+          };
           memory.set("tokens", entry);
           await saveToDisk(entry);
+          Bun.write(Bun.stdout, `${entry.accessToken}\n`);
+          setTimeout(() => process.exit(0), 100);
+          return json({ ok: true });
         }
-        return json({
-          accessToken: entry.accessToken,
-          expiresAt: entry.expiresAt,
-        });
+
+        if (url.pathname === "/api/token" && req.method === "GET") {
+          let entry = memory.get("tokens");
+          if (!entry) {
+            const disk = await loadFromDisk();
+            if (disk) {
+              entry = disk;
+              memory.set("tokens", entry);
+            }
+          }
+          if (!entry)
+            return json({ error: "not_authenticated" }, { status: 401 });
+          const now = Math.floor(Date.now() / 1000);
+          if (now >= entry.expiresAt - 60) {
+            const refreshed = await exchangeRefreshToken(entry.refreshToken);
+            entry.accessToken = refreshed.access_token;
+            entry.expiresAt =
+              Math.floor(Date.now() / 1000) + refreshed.expires_in;
+            if (refreshed.refresh_token)
+              entry.refreshToken = refreshed.refresh_token;
+            memory.set("tokens", entry);
+            await saveToDisk(entry);
+          }
+          return json({
+            accessToken: entry.accessToken,
+            expiresAt: entry.expiresAt,
+          });
+        }
+
+        return notFound();
       }
 
+      const staticResp = await serveStatic(url.pathname);
+      if (staticResp) return staticResp;
+
       return notFound();
-    }
+    },
+    error() {},
+  });
 
-    const staticResp = await serveStatic(url.pathname);
-    if (staticResp) return staticResp;
-
-    return notFound();
-  },
-  error() {},
-});
-
-if (!serverStarted) {
-  serverStarted = true;
-  const url = `http://localhost:${PORT}`;
-  const tryRun = async (cmd: string, ...args: string[]) => {
-    try {
-      await Bun.$`${[cmd, ...args]}`.quiet();
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  (async () => {
-    if (process.platform === "darwin") {
-      if (await tryRun("open", url)) return;
-    } else if (process.platform === "win32") {
-      if (await tryRun("cmd", "/c", "start", "", url)) return;
-    } else {
-      if (await tryRun("xdg-open", url)) return;
-    }
-  })();
+  if (!serverStarted) {
+    serverStarted = true;
+    const url = `http://localhost:${PORT}`;
+    const tryRun = async (cmd: string, ...args: string[]) => {
+      try {
+        await Bun.$`${[cmd, ...args]}`.quiet();
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    (async () => {
+      if (process.platform === "darwin") {
+        if (await tryRun("open", url)) return;
+      } else if (process.platform === "win32") {
+        if (await tryRun("cmd", "/c", "start", "", url)) return;
+      } else {
+        if (await tryRun("xdg-open", url)) return;
+      }
+    })();
+  }
 }
