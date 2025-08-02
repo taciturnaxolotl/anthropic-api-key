@@ -1,6 +1,12 @@
 #!/usr/bin/env bun
 
 import { serve } from "bun";
+import {
+  bootstrapFromDisk,
+  exchangeRefreshToken,
+  loadFromDisk,
+  saveToDisk,
+} from "./lib/token";
 
 const PORT = Number(Bun.env.PORT || 8787);
 const ROOT = new URL("../", import.meta.url).pathname;
@@ -27,6 +33,8 @@ function json(data: unknown, init: ResponseInit = {}) {
     ...init,
   });
 }
+
+const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 
 function authorizeUrl(verifier: string, challenge: string) {
   const u = new URL("https://claude.ai/oauth/authorize");
@@ -61,29 +69,6 @@ async function pkcePair() {
   );
   const challenge = base64url(digest as ArrayBuffer);
   return { verifier, challenge };
-}
-
-const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-
-async function exchangeRefreshToken(refreshToken: string) {
-  const res = await fetch("https://console.anthropic.com/v1/oauth/token", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "user-agent": "CRUSH/1.0",
-    },
-    body: JSON.stringify({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: CLIENT_ID,
-    }),
-  });
-  if (!res.ok) throw new Error(`refresh failed: ${res.status}`);
-  return (await res.json()) as {
-    access_token: string;
-    refresh_token?: string;
-    expires_in: number;
-  };
 }
 
 function cleanPastedCode(input: string) {
@@ -122,85 +107,7 @@ async function exchangeAuthorizationCode(code: string, verifier: string) {
   };
 }
 
-const memory = new Map<
-  string,
-  { accessToken: string; refreshToken: string; expiresAt: number }
->();
-
-const HOME = Bun.env.HOME || Bun.env.USERPROFILE || ".";
-const CACHE_DIR = `${HOME}/.config/crush/anthropic`;
-const BEARER_FILE = `${CACHE_DIR}/bearer_token`;
-const REFRESH_FILE = `${CACHE_DIR}/refresh_token`;
-const EXPIRES_FILE = `${CACHE_DIR}/bearer_token.expires`;
-
-async function ensureDir() {
-  await Bun.$`mkdir -p ${CACHE_DIR}`;
-}
-
-async function writeSecret(path: string, data: string) {
-  await Bun.write(path, data);
-  await Bun.$`chmod 600 ${path}`;
-}
-
-async function readText(path: string) {
-  const f = Bun.file(path);
-  if (!(await f.exists())) return undefined;
-  return await f.text();
-}
-
-async function loadFromDisk() {
-  const [bearer, refresh, expires] = await Promise.all([
-    readText(BEARER_FILE),
-    readText(REFRESH_FILE),
-    readText(EXPIRES_FILE),
-  ]);
-  if (!bearer || !refresh || !expires) return undefined;
-  const exp = Number.parseInt(expires, 10) || 0;
-  return {
-    accessToken: bearer.trim(),
-    refreshToken: refresh.trim(),
-    expiresAt: exp,
-  };
-}
-
-async function saveToDisk(entry: {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
-}) {
-  await ensureDir();
-  await writeSecret(BEARER_FILE, `${entry.accessToken}\n`);
-  await writeSecret(REFRESH_FILE, `${entry.refreshToken}\n`);
-  await writeSecret(EXPIRES_FILE, `${String(entry.expiresAt)}\n`);
-}
-
-let serverStarted = false;
-
-async function bootstrapFromDisk() {
-  const entry = await loadFromDisk();
-  if (!entry) return false;
-  const now = Math.floor(Date.now() / 1000);
-  if (now < entry.expiresAt - 60) {
-    Bun.write(Bun.stdout, `${entry.accessToken}\n`);
-    setTimeout(() => process.exit(0), 50);
-    memory.set("tokens", entry);
-    return true;
-  }
-  try {
-    const refreshed = await exchangeRefreshToken(entry.refreshToken);
-    entry.accessToken = refreshed.access_token;
-    entry.expiresAt = Math.floor(Date.now() / 1000) + refreshed.expires_in;
-    if (refreshed.refresh_token) entry.refreshToken = refreshed.refresh_token;
-    await saveToDisk(entry);
-    memory.set("tokens", entry);
-    Bun.write(Bun.stdout, `${entry.accessToken}\n`);
-    setTimeout(() => process.exit(0), 50);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
+// Try to bootstrap from disk and exit if successful
 const didBootstrap = await bootstrapFromDisk();
 
 const argv = process.argv.slice(2);
@@ -222,6 +129,12 @@ if (argv.includes("-h") || argv.includes("--help")) {
 }
 
 if (!didBootstrap) {
+  // Only start the server and open the browser if we didn't bootstrap from disk
+  const memory = new Map<
+    string,
+    { accessToken: string; refreshToken: string; expiresAt: number }
+  >();
+
   serve({
     port: PORT,
     development: { console: false },
@@ -301,25 +214,13 @@ if (!didBootstrap) {
     error() {},
   });
 
-  if (!serverStarted) {
-    serverStarted = true;
-    const url = `http://localhost:${PORT}`;
-    const tryRun = async (cmd: string, ...args: string[]) => {
-      try {
-        await Bun.$`${[cmd, ...args]}`.quiet();
-        return true;
-      } catch {
-        return false;
-      }
-    };
-    (async () => {
-      if (process.platform === "darwin") {
-        if (await tryRun("open", url)) return;
-      } else if (process.platform === "win32") {
-        if (await tryRun("cmd", "/c", "start", "", url)) return;
-      } else {
-        if (await tryRun("xdg-open", url)) return;
-      }
-    })();
+  // Open browser
+  const url = `http://localhost:${PORT}`;
+  if (process.platform === "darwin") {
+    Bun.$`open ${url}`.catch(() => {});
+  } else if (process.platform === "win32") {
+    Bun.$`cmd /c start "" ${url}`.catch(() => {});
+  } else {
+    Bun.$`xdg-open ${url}`.catch(() => {});
   }
 }
