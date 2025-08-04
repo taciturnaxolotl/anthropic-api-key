@@ -11,17 +11,14 @@ bun install
 ## usage
 
 ```bash
-# one-off via bunx (recommended)
-bunx anthropic
-
-# or via npx
-npx anthropic
+# only works via bunx since it uses bun libraries
+bunx anthropic-api-key
 
 # override port
-PORT=9999 bunx anthropic
+PORT=9999 bunx anthropic-api-key
 
 # help
-bunx anthropic --help
+bunx anthropic-api-key --help
 ```
 
 ## what it does
