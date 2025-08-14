@@ -54,7 +54,7 @@ export async function exchangeRefreshToken(refreshToken: string) {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "user-agent": "CRUSH/1.0",
+      "user-agent": "anthropic",
     },
     body: JSON.stringify({
       grant_type: "refresh_token",

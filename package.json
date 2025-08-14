@@ -1,6 +1,6 @@
 {
   "name": "anthropic-api-key",
-  "version": "0.1.6",
+  "version": "0.1.8",
   "description": "CLI to fetch Anthropic API access tokens via OAuth with PKCE using Bun.",
   "type": "module",
   "private": false,

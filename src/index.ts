@@ -17,23 +17,6 @@ import {
 } from "./lib/token";
 
 const PORT = Number(Bun.env.PORT || 8787);
-const ROOT = new URL("../", import.meta.url).pathname;
-const PUBLIC_DIR = `${ROOT}public`;
-
-function notFound() {
-  return new Response("Not found", { status: 404 });
-}
-
-async function serveStatic(pathname: string) {
-  const filePath = PUBLIC_DIR + (pathname === "/" ? "/index.html" : pathname);
-  try {
-    const file = Bun.file(filePath);
-    if (!(await file.exists())) return null;
-    return new Response(file);
-  } catch {
-    return null;
-  }
-}
 
 function json(data: unknown, init: ResponseInit = {}) {
   return new Response(JSON.stringify(data), {
@@ -136,30 +119,210 @@ if (argv.includes("-h") || argv.includes("--help")) {
   process.exit(0);
 }
 
+const indexHtml = `
+  <!doctype html>
+  <html>
+      <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>Anthropic Auth</title>
+          <style>
+              body {
+                  font-family:
+                      system-ui,
+                      -apple-system,
+                      Segoe UI,
+                      Roboto,
+                      Ubuntu,
+                      Cantarell,
+                      Noto Sans,
+                      sans-serif;
+                  background: #0f0f10;
+                  color: #fff;
+                  margin: 0;
+                  display: flex;
+                  min-height: 100vh;
+                  align-items: center;
+                  justify-content: center;
+              }
+              .card {
+                  background: #1a1a1b;
+                  border: 1px solid #2b2b2c;
+                  border-radius: 14px;
+                  padding: 28px;
+                  max-width: 560px;
+                  width: 100%;
+              }
+              h1 {
+                  margin: 0 0 8px;
+              }
+              p {
+                  color: #9aa0a6;
+              }
+              button,
+              a.button {
+                  background: linear-gradient(135deg, #ff6b35, #ff8e53);
+                  color: #fff;
+                  border: none;
+                  border-radius: 10px;
+                  padding: 12px 16px;
+                  font-weight: 600;
+                  cursor: pointer;
+                  text-decoration: none;
+                  display: inline-block;
+              }
+              textarea {
+                  width: 100%;
+                  min-height: 120px;
+                  background: #111;
+                  border: 1px solid #2b2b2c;
+                  border-radius: 10px;
+                  color: #fff;
+                  padding: 10px;
+              }
+              .row {
+                  margin: 16px 0;
+              }
+              .muted {
+                  color: #9aa0a6;
+              }
+              .status {
+                  margin-top: 8px;
+                  font-size: 14px;
+              }
+          </style>
+      <script type="module" crossorigin src="../anthropic-api-key/index-9f070n0a.js"></script></head>
+      <body>
+          <div class="card">
+              <h1>Anthropic Authentication</h1>
+              <p class="muted">
+                  Start the OAuth flow, authorize in the new tab, then paste the
+                  returned token here.
+              </p>
+
+              <div class="row">
+                  <a
+                      id="authlink"
+                      class="button"
+                      href="#"
+                      target="_blank"
+                      style="display: none"
+                      >Open Anthropic Authorization</a
+                  >
+              </div>
+
+              <div class="row">
+                  <label for="code">Authorization code</label>
+                  <textarea
+                      id="code"
+                      placeholder="Paste the exact code shown by Anthropic (not a URL). If it includes a #, keep the part after it too."
+                  ></textarea>
+              </div>
+
+              <div class="row">
+                  <button id="complete">Complete Authentication</button>
+              </div>
+
+              <div id="status" class="status"></div>
+          </div>
+
+          <script>
+              let verifier = "";
+              const statusEl = document.getElementById("status");
+
+              function setStatus(msg, ok) {
+                  statusEl.textContent = msg;
+                  statusEl.style.color = ok ? "#34a853" : "#ea4335";
+              }
+
+              (async () => {
+                  setStatus("Preparing authorization...", true);
+                  const res = await fetch("/api/auth/start", { method: "POST" });
+                  if (!res.ok) {
+                      setStatus("Failed to prepare auth", false);
+                      return;
+                  }
+                  const data = await res.json();
+                  verifier = data.verifier;
+                  const a = document.getElementById("authlink");
+                  a.href = data.authUrl;
+                  a.style.display = "inline-block";
+                  setStatus(
+                      'Ready. Click "Open Authorization" to continue.',
+                      true,
+                  );
+              })();
+
+              const completeBtn = document.getElementById("complete");
+              document
+                  .getElementById("complete")
+                  .addEventListener("click", async () => {
+                      if (completeBtn.disabled) return;
+                      completeBtn.disabled = true;
+                      const code = document.getElementById("code").value.trim();
+                      if (!code || !verifier) {
+                          setStatus(
+                              "Missing code or verifier. Click Start first.",
+                              false,
+                          );
+                          completeBtn.disabled = false;
+                          return;
+                      }
+                      const res = await fetch("/api/auth/complete", {
+                          method: "POST",
+                          headers: { "content-type": "application/json" },
+                          body: JSON.stringify({ code, verifier }),
+                      });
+                      if (!res.ok) {
+                          setStatus("Code exchange failed", false);
+                          completeBtn.disabled = false;
+                          return;
+                      }
+                      setStatus("Authenticated! Fetching token...", true);
+                      const t = await fetch("/api/token");
+                      if (!t.ok) {
+                          setStatus("Could not fetch token", false);
+                          completeBtn.disabled = false;
+                          return;
+                      }
+                      const tok = await t.json();
+                      setStatus(
+                          "Access token acquired (expires " +
+                              new Date(tok.expiresAt * 1000).toLocaleString() +
+                              ")",
+                          true,
+                      );
+                      setTimeout(() => {
+                          try {
+                              window.close();
+                          } catch {}
+                      }, 500);
+                  });
+          </script>
+      </body>
+  </html>
+`;
+
 if (!didBootstrap) {
   // Only start the server and open the browser if we didn't bootstrap from disk
   const memory = new Map<
     string,
     { accessToken: string; refreshToken: string; expiresAt: number }
   >();
-
   serve({
     port: PORT,
     development: { console: false },
-    async fetch(req) {
-      const url = new URL(req.url);
-
-      if (url.pathname.startsWith("/api/")) {
-        if (url.pathname === "/api/ping")
-          return json({ ok: true, ts: Date.now() });
-
-        if (url.pathname === "/api/auth/start" && req.method === "POST") {
+    routes: {
+      "/api/auth/start": {
+        POST: async () => {
           const { verifier, challenge } = await pkcePair();
           const authUrl = authorizeUrl(verifier, challenge);
           return json({ authUrl, verifier });
-        }
+        },
+      },
 
-        if (url.pathname === "/api/auth/complete" && req.method === "POST") {
+      "/api/auth/complete": {
+        POST: async (req) => {
           const body = (await req.json().catch(() => ({}))) as {
             code?: string;
             verifier?: string;
@@ -181,9 +344,12 @@ if (!didBootstrap) {
           Bun.write(Bun.stdout, `${entry.accessToken}\n`);
           setTimeout(() => process.exit(0), 100);
           return json({ ok: true });
-        }
+        },
+      },
 
-        if (url.pathname === "/api/token" && req.method === "GET") {
+      // Get current token (refresh if needed)
+      "/api/token": {
+        GET: async () => {
           let entry = memory.get("tokens");
           if (!entry) {
             const disk = await loadFromDisk();
@@ -209,17 +375,23 @@ if (!didBootstrap) {
             accessToken: entry.accessToken,
             expiresAt: entry.expiresAt,
           });
-        }
+        },
+      },
 
-        return notFound();
-      }
-
-      const staticResp = await serveStatic(url.pathname);
-      if (staticResp) return staticResp;
-
-      return notFound();
+      // Wildcard route for all other /api/ routes
+      "/": () =>
+        new Response(indexHtml, {
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
     },
-    error() {},
+
+    // Fallback for all other routes: serve static or 404
+    fetch() {
+      return new Response(
+        "something went wrong and your request fell through",
+        { status: 404 },
+      );
+    },
   });
 
   // Open browser
