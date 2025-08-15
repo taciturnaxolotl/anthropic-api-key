@@ -1,6 +1,6 @@
 {
   "name": "anthropic-api-key",
-  "version": "0.1.8",
+  "version": "0.2.1",
   "description": "CLI to fetch Anthropic API access tokens via OAuth with PKCE using Bun.",
   "type": "module",
   "private": false,
@@ -32,5 +32,11 @@
   "devDependencies": {
     "@types/bun": "latest",
     "typescript": "^5"
+  },
+  "dependencies": {
+    "@types/express": "^5.0.3",
+    "express": "^5.1.0",
+    "node-fetch": "^3.3.2",
+    "open": "^10.2.0"
   }
 }

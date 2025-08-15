@@ -1,14 +1,9 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
-// Detect if running under Node.js instead of Bun
-if (typeof Bun === "undefined") {
-  console.error(
-    "❌ This CLI requires Bun. Please install Bun from https://bun.sh/",
-  );
-  process.exit(1);
-}
-
-import { serve } from "bun";
+import { createServer } from "node:http";
+import express from "express";
+import fetch from "node-fetch";
+import open from "open";
 import {
   bootstrapFromDisk,
   exchangeRefreshToken,
@@ -16,13 +11,10 @@ import {
   saveToDisk,
 } from "./lib/token";
 
-const PORT = Number(Bun.env.PORT || 8787);
+const PORT = Number(process.env.PORT || 8787);
 
-function json(data: unknown, init: ResponseInit = {}) {
-  return new Response(JSON.stringify(data), {
-    headers: { "content-type": "application/json", ...(init.headers || {}) },
-    ...init,
-  });
+function json(res: express.Response, data: unknown, status = 200) {
+  res.status(status).json(data);
 }
 
 const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
@@ -81,7 +73,7 @@ async function exchangeAuthorizationCode(code: string, verifier: string) {
     client_id: CLIENT_ID,
     redirect_uri: "https://console.anthropic.com/oauth/code/callback",
     code_verifier: verifier,
-  } satisfies Record<string, string>;
+  } as Record<string, string>;
   const res = await fetch("https://console.anthropic.com/v1/oauth/token", {
     method: "POST",
     headers: {
@@ -103,17 +95,12 @@ const didBootstrap = await bootstrapFromDisk();
 
 const argv = process.argv.slice(2);
 if (argv.includes("-h") || argv.includes("--help")) {
-  Bun.write(Bun.stdout, `Usage: anthropic\n\n`);
-  Bun.write(
-    Bun.stdout,
-    `  anthropic                Start UI and flow; prints token on success and exits.\n`,
+  console.log(`Usage: anthropic\n`);
+  console.log(
+    `  anthropic                Start UI and flow; prints token on success and exits.`,
   );
-  Bun.write(
-    Bun.stdout,
-    `  PORT=xxxx anthropic      Override port (default 8787).\n`,
-  );
-  Bun.write(
-    Bun.stdout,
+  console.log(`  PORT=xxxx anthropic      Override port (default 8787).`);
+  console.log(
     `\nTokens are cached at ~/.config/crush/anthropic and reused on later runs.\n`,
   );
   process.exit(0);
@@ -309,98 +296,72 @@ if (!didBootstrap) {
     string,
     { accessToken: string; refreshToken: string; expiresAt: number }
   >();
-  serve({
-    port: PORT,
-    development: { console: false },
-    routes: {
-      "/api/auth/start": {
-        POST: async () => {
-          const { verifier, challenge } = await pkcePair();
-          const authUrl = authorizeUrl(verifier, challenge);
-          return json({ authUrl, verifier });
-        },
-      },
+  const app = express();
+  app.use(express.json());
 
-      "/api/auth/complete": {
-        POST: async (req) => {
-          const body = (await req.json().catch(() => ({}))) as {
-            code?: string;
-            verifier?: string;
-          };
-          const code = String(body.code ?? "");
-          const verifier = String(body.verifier ?? "");
-          if (!code || !verifier)
-            return json({ error: "missing code or verifier" }, { status: 400 });
-          const tokens = await exchangeAuthorizationCode(code, verifier);
-          const expiresAt =
-            Math.floor(Date.now() / 1000) + (tokens.expires_in ?? 0);
-          const entry = {
-            accessToken: tokens.access_token,
-            refreshToken: tokens.refresh_token,
-            expiresAt,
-          };
-          memory.set("tokens", entry);
-          await saveToDisk(entry);
-          Bun.write(Bun.stdout, `${entry.accessToken}\n`);
-          setTimeout(() => process.exit(0), 100);
-          return json({ ok: true });
-        },
-      },
-
-      // Get current token (refresh if needed)
-      "/api/token": {
-        GET: async () => {
-          let entry = memory.get("tokens");
-          if (!entry) {
-            const disk = await loadFromDisk();
-            if (disk) {
-              entry = disk;
-              memory.set("tokens", entry);
-            }
-          }
-          if (!entry)
-            return json({ error: "not_authenticated" }, { status: 401 });
-          const now = Math.floor(Date.now() / 1000);
-          if (now >= entry.expiresAt - 60) {
-            const refreshed = await exchangeRefreshToken(entry.refreshToken);
-            entry.accessToken = refreshed.access_token;
-            entry.expiresAt =
-              Math.floor(Date.now() / 1000) + refreshed.expires_in;
-            if (refreshed.refresh_token)
-              entry.refreshToken = refreshed.refresh_token;
-            memory.set("tokens", entry);
-            await saveToDisk(entry);
-          }
-          return json({
-            accessToken: entry.accessToken,
-            expiresAt: entry.expiresAt,
-          });
-        },
-      },
-
-      // Wildcard route for all other /api/ routes
-      "/": () =>
-        new Response(indexHtml, {
-          headers: { "content-type": "text/html; charset=utf-8" },
-        }),
-    },
-
-    // Fallback for all other routes: serve static or 404
-    fetch() {
-      return new Response(
-        "something went wrong and your request fell through",
-        { status: 404 },
-      );
-    },
+  app.post("/api/auth/start", async (_req, res) => {
+    const { verifier, challenge } = await pkcePair();
+    const authUrl = authorizeUrl(verifier, challenge);
+    json(res, { authUrl, verifier });
   });
 
-  // Open browser
-  const url = `http://localhost:${PORT}`;
-  if (process.platform === "darwin") {
-    Bun.$`open ${url}`.catch(() => {});
-  } else if (process.platform === "win32") {
-    Bun.$`cmd /c start "" ${url}`.catch(() => {});
-  } else {
-    Bun.$`xdg-open ${url}`.catch(() => {});
-  }
+  app.post("/api/auth/complete", async (req, res) => {
+    const body = req.body as { code?: string; verifier?: string };
+    const code = String(body.code ?? "");
+    const verifier = String(body.verifier ?? "");
+    if (!code || !verifier)
+      return json(res, { error: "missing code or verifier" }, 400);
+    const tokens = await exchangeAuthorizationCode(code, verifier);
+    const expiresAt = Math.floor(Date.now() / 1000) + (tokens.expires_in ?? 0);
+    const entry = {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      expiresAt,
+    };
+    memory.set("tokens", entry);
+    await saveToDisk(entry);
+    console.log(`${entry.accessToken}\n`);
+    setTimeout(() => process.exit(0), 100);
+    json(res, { ok: true });
+  });
+
+  app.get("/api/token", async (_req, res) => {
+    let entry = memory.get("tokens");
+    if (!entry) {
+      const disk = await loadFromDisk();
+      if (disk) {
+        entry = disk;
+        memory.set("tokens", entry);
+      }
+    }
+    if (!entry) return json(res, { error: "not_authenticated" }, 401);
+    const now = Math.floor(Date.now() / 1000);
+    if (now >= entry.expiresAt - 60) {
+      const refreshed = await exchangeRefreshToken(entry.refreshToken);
+      entry.accessToken = refreshed.access_token;
+      entry.expiresAt = Math.floor(Date.now() / 1000) + refreshed.expires_in;
+      if (refreshed.refresh_token) entry.refreshToken = refreshed.refresh_token;
+      memory.set("tokens", entry);
+      await saveToDisk(entry);
+    }
+    json(res, {
+      accessToken: entry.accessToken,
+      expiresAt: entry.expiresAt,
+    });
+  });
+
+  app.get("/", (_req, res) => {
+    res.setHeader("content-type", "text/html; charset=utf-8");
+    res.send(indexHtml);
+  });
+
+  app.use((_req, res) => {
+    res.status(404).send("something went wrong and your request fell through");
+  });
+
+  const server = createServer(app);
+  server.listen(PORT, async () => {
+    const url = `http://localhost:${PORT}`;
+    await open(url);
+  });
 }

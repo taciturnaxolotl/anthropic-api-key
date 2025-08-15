@@ -2,17 +2,11 @@
 
 simple cli to fetch an anthropic access token using oauth (pkce), built with bun
 
-## install
-
-```bash
-bun install
-```
-
 ## usage
 
 ```bash
-# only works via bunx since it uses bun libraries
 bunx anthropic-api-key
+npx anthropic-api-key
 
 # override port
 PORT=9999 bunx anthropic-api-key

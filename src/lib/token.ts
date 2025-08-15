@@ -1,10 +1,14 @@
+import { chmodSync, existsSync } from "node:fs";
+import fs from "node:fs/promises";
+import path from "node:path";
+
 const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 
-const HOME = Bun.env.HOME || Bun.env.USERPROFILE || ".";
-const CACHE_DIR = `${HOME}/.config/crush/anthropic`;
-const BEARER_FILE = `${CACHE_DIR}/bearer_token`;
-const REFRESH_FILE = `${CACHE_DIR}/refresh_token`;
-const EXPIRES_FILE = `${CACHE_DIR}/bearer_token.expires`;
+const HOME = process.env.HOME || process.env.USERPROFILE || ".";
+const CACHE_DIR = path.join(HOME, ".config/crush/anthropic");
+const BEARER_FILE = path.join(CACHE_DIR, "bearer_token");
+const REFRESH_FILE = path.join(CACHE_DIR, "refresh_token");
+const EXPIRES_FILE = path.join(CACHE_DIR, "bearer_token.expires");
 
 export type TokenEntry = {
   accessToken: string;
@@ -13,18 +17,17 @@ export type TokenEntry = {
 };
 
 export async function ensureDir() {
-  await Bun.$`mkdir -p ${CACHE_DIR}`;
+  await fs.mkdir(CACHE_DIR, { recursive: true });
 }
 
-export async function writeSecret(path: string, data: string) {
-  await Bun.write(path, data);
-  await Bun.$`chmod 600 ${path}`;
+export async function writeSecret(filePath: string, data: string) {
+  await fs.writeFile(filePath, data, { encoding: "utf8", mode: 0o600 });
+  chmodSync(filePath, 0o600);
 }
 
-export async function readText(path: string) {
-  const f = Bun.file(path);
-  if (!(await f.exists())) return undefined;
-  return await f.text();
+export async function readText(filePath: string) {
+  if (!existsSync(filePath)) return undefined;
+  return await fs.readFile(filePath, "utf8");
 }
 
 export async function loadFromDisk(): Promise<TokenEntry | undefined> {
@@ -79,7 +82,7 @@ export async function bootstrapFromDisk(): Promise<boolean> {
   if (!entry) return false;
   const now = Math.floor(Date.now() / 1000);
   if (now < entry.expiresAt - 60) {
-    Bun.write(Bun.stdout, `${entry.accessToken}\n`);
+    process.stdout.write(`${entry.accessToken}\n`);
     setTimeout(() => process.exit(0), 50);
     return true;
   }
@@ -89,7 +92,7 @@ export async function bootstrapFromDisk(): Promise<boolean> {
     entry.expiresAt = Math.floor(Date.now() / 1000) + refreshed.expires_in;
     if (refreshed.refresh_token) entry.refreshToken = refreshed.refresh_token;
     await saveToDisk(entry);
-    Bun.write(Bun.stdout, `${entry.accessToken}\n`);
+    process.stdout.write(`${entry.accessToken}\n`);
     setTimeout(() => process.exit(0), 50);
     return true;
   } catch {
