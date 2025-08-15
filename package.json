@@ -1,6 +1,6 @@
 {
   "name": "anthropic-api-key",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "CLI to fetch Anthropic API access tokens via OAuth with PKCE using Bun.",
   "type": "module",
   "private": false,
@@ -26,7 +26,7 @@
     "public"
   ],
   "scripts": {
-    "build": "bun build src/index.ts src/lib/token.ts --outdir=dist --target=bun --sourcemap=external",
+    "build": "bun build src/index.ts src/lib/token.ts --outdir=dist --target=node --sourcemap=external",
     "prepare": "bun run build"
   },
   "devDependencies": {
